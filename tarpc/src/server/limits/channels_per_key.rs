@@ -10,13 +10,13 @@ use crate::{
 };
 use fnv::FnvHashMap;
 use futures::{prelude::*, ready, stream::Fuse, task::*};
+use log::{debug, info, trace};
 use pin_project::pin_project;
 use std::sync::{Arc, Weak};
 use std::{
     collections::hash_map::Entry, convert::TryFrom, fmt, hash::Hash, marker::Unpin, pin::Pin,
 };
 use tokio::sync::mpsc;
-use tracing::{debug, info, trace};
 
 /// An [`Incoming`](crate::server::incoming::Incoming) stream that drops new channels based on
 /// per-key limits.
@@ -171,10 +171,11 @@ where
         let tracker = self.as_mut().increment_channels_for_key(key.clone())?;
 
         trace!(
-            channel_filter_key = %key,
-            open_channels = Arc::strong_count(&tracker),
-            max_open_channels = self.channels_per_key,
-            "Opening channel");
+            "Opening channel key={} open={} max={}",
+            key,
+            Arc::strong_count(&tracker),
+            self.channels_per_key
+        );
 
         Ok(TrackedChannel {
             tracker,
@@ -199,10 +200,9 @@ where
                 let count = o.get().strong_count();
                 if count >= TryFrom::try_from(*self_.channels_per_key).unwrap() {
                     info!(
-                        channel_filter_key = %key,
-                        open_channels = count,
-                        max_open_channels = *self_.channels_per_key,
-                        "At open channel limit");
+                        "At open channel limit key={} open={} max={}",
+                        key, count, *self_.channels_per_key
+                    );
                     Err(key)
                 } else {
                     Ok(o.get().upgrade().unwrap_or_else(|| {
@@ -233,9 +233,7 @@ where
         let self_ = self.project();
         match ready!(self_.dropped_keys.poll_recv(cx)) {
             Some(key) => {
-                debug!(
-                    channel_filter_key = %key,
-                    "All channels dropped");
+                debug!("All channels dropped, filter: {}", key);
                 self_.key_counts.remove(&key);
                 self_.key_counts.compact(0.1);
                 Poll::Ready(())

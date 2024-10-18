@@ -173,8 +173,8 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use futures::{prelude::*, stream};
+    use log::trace;
     use std::io;
-    use tracing::trace;
 
     #[test]
     fn ensure_is_transport() {

@@ -38,7 +38,7 @@ use futures::{
     future::{self, AbortHandle},
     prelude::*,
 };
-use opentelemetry::trace::TracerProvider as _;
+use log::info;
 use publisher::Publisher as _;
 use std::{
     collections::HashMap,
@@ -55,8 +55,6 @@ use tarpc::{
     tokio_serde::formats::Json,
 };
 use tokio::net::ToSocketAddrs;
-use tracing::info;
-use tracing_subscriber::prelude::*;
 
 pub mod subscriber {
     #[tarpc::service]
@@ -85,7 +83,10 @@ impl subscriber::Subscriber for Subscriber {
     }
 
     async fn receive(self, _: context::Context, topic: String, message: String) {
-        info!(local_addr = %self.local_addr, %topic, %message, "ReceivedMessage")
+        info!(
+            "ReceivedMessage on {} -- topic={} msg={}",
+            self.local_addr, topic, message
+        )
     }
 }
 
@@ -120,7 +121,7 @@ impl Subscriber {
             future::abortable(handler.execute(subscriber.serve()).for_each(spawn));
         tokio::spawn(async move {
             match handler.await {
-                Ok(()) | Err(future::Aborted) => info!(?local_addr, "subscriber shutdown."),
+                Ok(()) | Err(future::Aborted) => info!("subscriber shutdown: {:?}", local_addr),
             }
         });
         Ok(SubscriberHandle(abort_handle))
@@ -156,13 +157,13 @@ impl Publisher {
             subscriptions: self.clone().start_subscription_manager().await?,
         };
 
-        info!(publisher_addr = %publisher_addrs.publisher, "listening for publishers.",);
+        info!("listening for publishers {}", publisher_addrs.publisher);
         tokio::spawn(async move {
             // Because this is just an example, we know there will only be one publisher. In more
             // realistic code, this would be a loop to continually accept new publisher
             // connections.
             let publisher = connecting_publishers.next().await.unwrap().unwrap();
-            info!(publisher.peer_addr = ?publisher.peer_addr(), "publisher connected.");
+            info!("publisher connected: {:?}", publisher.peer_addr());
 
             server::BaseChannel::with_defaults(publisher)
                 .execute(self.serve())
@@ -178,7 +179,7 @@ impl Publisher {
             .await?
             .filter_map(|r| future::ready(r.ok()));
         let new_subscriber_addr = connecting_subscribers.get_ref().local_addr();
-        info!(?new_subscriber_addr, "listening for subscribers.");
+        info!("listening for subscribers {:?}", new_subscriber_addr);
 
         tokio::spawn(async move {
             while let Some(conn) = connecting_subscribers.next().await {
@@ -218,7 +219,7 @@ impl Publisher {
                 },
             );
 
-            info!(%subscriber_addr, ?topics, "subscribed to new topics");
+            info!("{} subscribed to new topics: {:?}", subscriber_addr, topics);
             let mut subscriptions = self.subscriptions.write().unwrap();
             for topic in topics {
                 subscriptions
@@ -237,10 +238,7 @@ impl Publisher {
     ) {
         tokio::spawn(async move {
             if let Err(e) = client_dispatch.await {
-                info!(
-                    %subscriber_addr,
-                    error = %e,
-                    "subscriber connection broken");
+                info!("subscriber connection {} broken: {}", subscriber_addr, e);
             }
             // Don't clean up the subscriber until initialization is done.
             let _ = subscriber_ready.await;
@@ -283,35 +281,8 @@ impl publisher::Publisher for Publisher {
     }
 }
 
-/// Initializes an OpenTelemetry tracing subscriber with a OTLP backend.
-pub fn init_tracing(service_name: &'static str) -> anyhow::Result<()> {
-    let tracer_provider = opentelemetry_otlp::new_pipeline()
-        .tracing()
-        .with_batch_config(opentelemetry_sdk::trace::BatchConfig::default())
-        .with_exporter(opentelemetry_otlp::new_exporter().tonic())
-        .with_trace_config(opentelemetry_sdk::trace::Config::default().with_resource(
-            opentelemetry_sdk::Resource::new([opentelemetry::KeyValue::new(
-                opentelemetry_semantic_conventions::resource::SERVICE_NAME,
-                service_name,
-            )]),
-        ))
-        .install_batch(opentelemetry_sdk::runtime::Tokio)?;
-    opentelemetry::global::set_tracer_provider(tracer_provider.clone());
-    let tracer = tracer_provider.tracer(service_name);
-
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::EnvFilter::from_default_env())
-        .with(tracing_subscriber::fmt::layer())
-        .with(tracing_opentelemetry::layer().with_tracer(tracer))
-        .try_init()?;
-
-    Ok(())
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    init_tracing("Pub/Sub")?;
-
     let addrs = Publisher {
         clients: Arc::new(Mutex::new(HashMap::new())),
         subscriptions: Arc::new(RwLock::new(HashMap::new())),
@@ -363,7 +334,6 @@ async fn main() -> anyhow::Result<()> {
         )
         .await?;
 
-    opentelemetry::global::shutdown_tracer_provider();
     info!("done.");
 
     Ok(())

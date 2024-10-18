@@ -24,7 +24,7 @@ where
         for i in 1.. {
             let result = self.stub.call(ctx, Arc::clone(&request)).await;
             if (self.should_retry)(&result, i) {
-                tracing::trace!("Retrying on attempt {i}");
+                log::trace!("Retrying on attempt {i}");
                 continue;
             }
             return result;

@@ -9,7 +9,6 @@
 
 use static_assertions::assert_impl_all;
 use std::time::{Duration, Instant};
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 /// A request context that carries request-scoped information like deadlines and trace information.
 /// It is sent from client to server and is used by the server to enforce response deadlines.
@@ -85,26 +84,11 @@ pub fn current() -> Context {
     Context::current()
 }
 
-#[derive(Clone)]
-struct Deadline(Instant);
-
-impl Default for Deadline {
-    fn default() -> Self {
-        Self(ten_seconds_from_now())
-    }
-}
-
 impl Context {
     /// Returns the context for the current request, or a default Context if no request is active.
     pub fn current() -> Self {
-        let span = tracing::Span::current();
         Self {
-            deadline: span
-                .context()
-                .get::<Deadline>()
-                .cloned()
-                .unwrap_or_default()
-                .0,
+            deadline: ten_seconds_from_now(),
         }
     }
 }

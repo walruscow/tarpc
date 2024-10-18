@@ -215,7 +215,7 @@ where
                 request,
             }),
             Err(AlreadyExistsError) => {
-                tracing::trace!("DuplicateRequest");
+                log::trace!("DuplicateRequest");
                 Err(AlreadyExistsError)
             }
         }
@@ -477,7 +477,7 @@ where
                 .combine(expiration_status)
                 .combine(request_status);
 
-            tracing::trace!(
+            log::trace!(
                 "Cancellations: {cancellation_status:?}, \
                 Expired requests: {expiration_status:?}, \
                 Inbound: {request_status:?}, \
@@ -523,7 +523,7 @@ where
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
-        tracing::trace!("poll_flush");
+        log::trace!("poll_flush");
         self.project()
             .transport
             .poll_flush(cx)
@@ -725,7 +725,7 @@ where
     {
         self.take_while(|result| {
             if let Err(e) = result {
-                tracing::warn!("Requests stream errored out: {}", e);
+                log::warn!("Requests stream errored out: {}", e);
             }
             futures::future::ready(result.is_ok())
         })
@@ -844,13 +844,13 @@ impl<Req, Res> InFlightRequest<Req, Res> {
         let _ = Abortable::new(
             async move {
                 let message = serve.serve(context, message).await;
-                tracing::trace!("CompleteRequest");
+                log::trace!("CompleteRequest");
                 let response = Response {
                     request_id,
                     message,
                 };
                 let _ = response_tx.send(response).await;
-                tracing::trace!("BufferResponse");
+                log::trace!("BufferResponse");
             },
             abort_registration,
         )
@@ -878,28 +878,28 @@ where
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         loop {
             let read = self.as_mut().pump_read(cx).map_err(|e| {
-                tracing::trace!("read: {}", print_err(&e));
+                log::trace!("read: {}", print_err(&e));
                 e
             })?;
             let read_closed = matches!(read, Poll::Ready(None));
             let write = self.as_mut().pump_write(cx, read_closed).map_err(|e| {
-                tracing::trace!("write: {}", print_err(&e));
+                log::trace!("write: {}", print_err(&e));
                 e
             })?;
             match (read, write) {
                 (Poll::Ready(None), Poll::Ready(None)) => {
-                    tracing::trace!("read: Poll::Ready(None), write: Poll::Ready(None)");
+                    log::trace!("read: Poll::Ready(None), write: Poll::Ready(None)");
                     return Poll::Ready(None);
                 }
                 (Poll::Ready(Some(request_handler)), _) => {
-                    tracing::trace!("read: Poll::Ready(Some), write: _");
+                    log::trace!("read: Poll::Ready(Some), write: _");
                     return Poll::Ready(Some(Ok(request_handler)));
                 }
                 (_, Poll::Ready(Some(()))) => {
-                    tracing::trace!("read: _, write: Poll::Ready(Some)");
+                    log::trace!("read: _, write: Poll::Ready(Some)");
                 }
                 (read @ Poll::Pending, write) | (read, write @ Poll::Pending) => {
-                    tracing::trace!(
+                    log::trace!(
                         "read pending: {}, write pending: {}",
                         read.is_pending(),
                         write.is_pending()
@@ -1056,7 +1056,7 @@ mod tests {
         }
         impl<Resp> AfterRequest<Resp> for PrintLatency {
             async fn after(&mut self, _: &mut context::Context, _: &mut Result<Resp, ServerError>) {
-                tracing::trace!("Elapsed: {:?}", self.start.elapsed());
+                log::trace!("Elapsed: {:?}", self.start.elapsed());
             }
         }
 

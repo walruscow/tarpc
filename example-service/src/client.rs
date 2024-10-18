@@ -5,11 +5,10 @@
 // https://opensource.org/licenses/MIT.
 
 use clap::Parser;
-use service::{init_tracing, WorldClient};
+use service::WorldClient;
 use std::{net::SocketAddr, time::Duration};
 use tarpc::{client, context, tokio_serde::formats::Json};
 use tokio::time::sleep;
-use tracing::Instrument;
 
 #[derive(Parser)]
 struct Flags {
@@ -24,7 +23,6 @@ struct Flags {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let flags = Flags::parse();
-    init_tracing("Tarpc Example Client")?;
 
     let mut transport = tarpc::serde_transport::tcp::connect(flags.server_addr, Json::default);
     transport.config_mut().max_frame_length(usize::MAX);
@@ -40,12 +38,11 @@ async fn main() -> anyhow::Result<()> {
             hello2 = client.hello(context::current(), format!("{}2", flags.name)) => { hello2 }
         }
     }
-    .instrument(tracing::info_span!("Two Hellos"))
     .await;
 
     match hello {
-        Ok(hello) => tracing::info!("{hello:?}"),
-        Err(e) => tracing::warn!("{:?}", anyhow::Error::from(e)),
+        Ok(hello) => log::info!("{hello:?}"),
+        Err(e) => log::warn!("{:?}", anyhow::Error::from(e)),
     }
 
     // Let the background span processor finish.

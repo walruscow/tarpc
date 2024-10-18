@@ -91,10 +91,6 @@ name = "compression"
 required-features = ["serde-transport", "tcp"]
 
 [[example]]
-name = "tracing"
-required-features = ["full"]
-
-[[example]]
 name = "readme"
 required-features = ["full"]
 
