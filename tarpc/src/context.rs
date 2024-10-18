@@ -7,13 +7,8 @@
 //! Provides a request context that carries a deadline and trace context. This context is sent from
 //! client to server and is used by the server to enforce response deadlines.
 
-use crate::trace::{self, TraceId};
-use opentelemetry::trace::TraceContextExt;
 use static_assertions::assert_impl_all;
-use std::{
-    convert::TryFrom,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 /// A request context that carries request-scoped information like deadlines and trace information.
@@ -31,11 +26,6 @@ pub struct Context {
     // Serialized as a Duration to prevent clock skew issues.
     #[cfg_attr(feature = "serde1", serde(with = "absolute_to_relative_time"))]
     pub deadline: Instant,
-    /// Uniquely identifies requests originating from the same source.
-    /// When a service handles a request by making requests itself, those requests should
-    /// include the same `trace_id` as that included on the original request. This way,
-    /// users can trace related actions across a distributed system.
-    pub trace_context: trace::Context,
 }
 
 #[cfg(feature = "serde1")]
@@ -109,8 +99,6 @@ impl Context {
     pub fn current() -> Self {
         let span = tracing::Span::current();
         Self {
-            trace_context: trace::Context::try_from(&span)
-                .unwrap_or_else(|_| trace::Context::default()),
             deadline: span
                 .context()
                 .get::<Deadline>()
@@ -118,33 +106,5 @@ impl Context {
                 .unwrap_or_default()
                 .0,
         }
-    }
-
-    /// Returns the ID of the request-scoped trace.
-    pub fn trace_id(&self) -> &TraceId {
-        &self.trace_context.trace_id
-    }
-}
-
-/// An extension trait for [`tracing::Span`] for propagating tarpc Contexts.
-pub(crate) trait SpanExt {
-    /// Sets the given context on this span. Newly-created spans will be children of the given
-    /// context's trace context.
-    fn set_context(&self, context: &Context);
-}
-
-impl SpanExt for tracing::Span {
-    fn set_context(&self, context: &Context) {
-        self.set_parent(
-            opentelemetry::Context::new()
-                .with_remote_span_context(opentelemetry::trace::SpanContext::new(
-                    opentelemetry::trace::TraceId::from(context.trace_context.trace_id),
-                    opentelemetry::trace::SpanId::from(context.trace_context.span_id),
-                    opentelemetry::trace::TraceFlags::from(context.trace_context.sampling_decision),
-                    true,
-                    opentelemetry::trace::TraceState::default(),
-                ))
-                .with_value(Deadline(context.deadline)),
-        );
     }
 }

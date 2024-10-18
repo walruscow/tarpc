@@ -71,7 +71,7 @@ where
     pub fn spawn(self) -> C {
         let dispatch = self.dispatch.unwrap_or_else(move |e| {
             let e = anyhow::Error::new(e);
-            tracing::warn!("Connection broken: {:?}", e);
+            log::warn!("Connection broken: {:?}", e);
         });
         tokio::spawn(dispatch);
         self.client
@@ -397,7 +397,7 @@ where
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<DispatchRequest<Req, Resp>, ChannelError<C::Error>>>> {
         if self.in_flight_requests().len() >= self.config.max_in_flight_requests {
-            tracing::info!(
+            log::info!(
                 "At in-flight request capacity ({}/{}).",
                 self.in_flight_requests().len(),
                 self.config.max_in_flight_requests
@@ -488,7 +488,6 @@ where
             message: request,
             context: context::Context {
                 deadline: ctx.deadline,
-                trace_context: ctx.trace_context,
             },
         });
         self.in_flight_requests()
@@ -577,15 +576,15 @@ where
         loop {
             match (self.as_mut().pump_read(cx)?, self.as_mut().pump_write(cx)?) {
                 (Poll::Ready(None), _) => {
-                    tracing::trace!("Shutdown: read half closed, so shutting down.");
+                    log::trace!("Shutdown: read half closed, so shutting down.");
                     return Poll::Ready(Ok(()));
                 }
                 (read, Poll::Ready(None)) => {
                     if self.in_flight_requests.is_empty() {
-                        tracing::trace!("Shutdown: write half closed, and no requests in flight.");
+                        log::trace!("Shutdown: write half closed, and no requests in flight.");
                         return Poll::Ready(Ok(()));
                     }
-                    tracing::trace!(
+                    log::trace!(
                         "Shutdown: write half closed, and {} requests in flight.",
                         self.in_flight_requests().len()
                     );
@@ -613,7 +612,7 @@ where
     ) -> Poll<Result<(), ChannelError<C::Error>>> {
         loop {
             if let Some(e) = self.terminal_error_mut() {
-                tracing::info!("RpcError::Channel");
+                log::info!("RpcError::Channel");
                 let e: ChannelError<C::Error> = e
                     .clone()
                     .downcast()
@@ -823,7 +822,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_permit_before_transport_error() {
-        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
         let (mut dispatch, mut channel, mut cx) = set_up_always_err(TransportError::Flush);
         let (tx, mut rx) = oneshot::channel();
         // reserve succeeds
@@ -840,7 +838,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_shutdown() {
-        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
         let (dispatch, channel, _server_channel) = set_up();
         drop(dispatch);
         // error on send
@@ -1020,8 +1017,6 @@ mod tests {
         Channel<String, String>,
         UnboundedChannel<ClientMessage<String>, Response<String>>,
     ) {
-        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
-
         let (to_dispatch, pending_requests) = mpsc::channel(1);
         let (cancellation, canceled_requests) = cancellations();
         let (client_channel, server_channel) = transport::channel::unbounded();

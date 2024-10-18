@@ -8,9 +8,7 @@
 
 use crate::{
     cancellations::{cancellations, CanceledRequests, RequestCancellation},
-    context::{self, SpanExt},
-    trace,
-    util::TimeUntil,
+    context::{self},
     ChannelError, ClientMessage, Request, RequestName, Response, ServerError, Transport,
 };
 use ::tokio::sync::mpsc;
@@ -23,10 +21,7 @@ use futures::{
 };
 use in_flight_requests::{AlreadyExistsError, InFlightRequests};
 use pin_project::pin_project;
-use std::{
-    convert::TryFrom, error::Error, fmt, marker::PhantomData, pin::Pin, sync::Arc, time::SystemTime,
-};
-use tracing::{info_span, instrument::Instrument, Span};
+use std::{error::Error, fmt, marker::PhantomData, pin::Pin, sync::Arc};
 
 mod in_flight_requests;
 pub mod request_hook;
@@ -202,44 +197,23 @@ where
 
     fn start_request(
         mut self: Pin<&mut Self>,
-        mut request: Request<Req>,
+        request: Request<Req>,
     ) -> Result<TrackedRequest<Req>, AlreadyExistsError> {
-        let span = info_span!(
-            "RPC",
-            rpc.trace_id = %request.context.trace_id(),
-            rpc.deadline = %humantime::format_rfc3339(SystemTime::now() + request.context.deadline.time_until()),
-            otel.kind = "server",
-            otel.name = tracing::field::Empty,
-        );
-        span.set_context(&request.context);
-        request.context.trace_context = trace::Context::try_from(&span).unwrap_or_else(|_| {
-            tracing::trace!(
-                "OpenTelemetry subscriber not installed; making unsampled \
-                            child context."
-            );
-            request.context.trace_context.new_child()
-        });
-        let entered = span.enter();
-        tracing::trace!("ReceiveRequest");
-        let start = self.in_flight_requests_mut().start_request(
-            request.id,
-            request.context.deadline,
-            span.clone(),
-        );
+        // rpc.deadline = %humantime::format_rfc3339(SystemTime::now() + request.context.deadline.time_until()),
+        log::trace!("ReceiveRequest");
+        let start = self
+            .in_flight_requests_mut()
+            .start_request(request.id, request.context.deadline);
         match start {
-            Ok(abort_registration) => {
-                drop(entered);
-                Ok(TrackedRequest {
-                    abort_registration,
-                    span,
-                    response_guard: ResponseGuard {
-                        request_id: request.id,
-                        request_cancellation: self.request_cancellation.clone(),
-                        cancel: false,
-                    },
-                    request,
-                })
-            }
+            Ok(abort_registration) => Ok(TrackedRequest {
+                abort_registration,
+                response_guard: ResponseGuard {
+                    request_id: request.id,
+                    request_cancellation: self.request_cancellation.clone(),
+                    cancel: false,
+                },
+                request,
+            }),
             Err(AlreadyExistsError) => {
                 tracing::trace!("DuplicateRequest");
                 Err(AlreadyExistsError)
@@ -262,8 +236,6 @@ pub struct TrackedRequest<Req> {
     /// A registration to abort a future when the [`Channel`] that produced this request stops
     /// tracking it.
     pub abort_registration: AbortRegistration,
-    /// A span representing the server processing of this request.
-    pub span: Span,
     /// An inert response guard. Becomes active in an InFlightRequest.
     pub response_guard: ResponseGuard,
 }
@@ -448,9 +420,8 @@ where
         loop {
             let cancellation_status = match self.canceled_requests_pin_mut().poll_recv(cx) {
                 Poll::Ready(Some(request_id)) => {
-                    if let Some(span) = self.in_flight_requests_mut().remove_request(request_id) {
-                        let _entered = span.enter();
-                        tracing::trace!("ResponseCancelled");
+                    if let Some(_span) = self.in_flight_requests_mut().remove_request(request_id) {
+                        log::trace!("ResponseCancelled");
                     }
                     Ready
                 }
@@ -536,12 +507,11 @@ where
     }
 
     fn start_send(mut self: Pin<&mut Self>, response: Response<Resp>) -> Result<(), Self::Error> {
-        if let Some(span) = self
+        if let Some(_span) = self
             .in_flight_requests_mut()
             .remove_request(response.request_id)
         {
-            let _entered = span.enter();
-            tracing::trace!("SendResponse");
+            log::trace!("SendResponse");
             self.project()
                 .transport
                 .start_send(response)
@@ -639,19 +609,16 @@ where
             |TrackedRequest {
                  request,
                  abort_registration,
-                 span,
                  mut response_guard,
              }| {
                 // The response guard becomes active once in an InFlightRequest.
                 response_guard.cancel = true;
                 {
-                    let _entered = span.enter();
-                    tracing::trace!("BeginRequest");
+                    log::trace!("BeginRequest");
                 }
                 InFlightRequest {
                     request,
                     abort_registration,
-                    span,
                     response_guard,
                     response_tx: self.responses_tx.clone(),
                 }
@@ -805,7 +772,6 @@ pub struct InFlightRequest<Req, Res> {
     request: Request<Req>,
     abort_registration: AbortRegistration,
     response_guard: ResponseGuard,
-    span: Span,
     response_tx: mpsc::Sender<Response<Res>>,
 }
 
@@ -868,7 +834,6 @@ impl<Req, Res> InFlightRequest<Req, Res> {
             response_tx,
             mut response_guard,
             abort_registration,
-            span,
             request:
                 Request {
                     context,
@@ -876,7 +841,6 @@ impl<Req, Res> InFlightRequest<Req, Res> {
                     id: request_id,
                 },
         } = self;
-        span.record("otel.name", message.name());
         let _ = Abortable::new(
             async move {
                 let message = serve.serve(context, message).await;
@@ -890,7 +854,6 @@ impl<Req, Res> InFlightRequest<Req, Res> {
             },
             abort_registration,
         )
-        .instrument(span)
         .await;
         // Request processing has completed, meaning either the channel canceled the request or
         // a request was sent back to the channel. Either way, the channel will clean up the

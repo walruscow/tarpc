@@ -59,10 +59,9 @@ where
 
             match ready!(self.as_mut().project().inner.poll_next(cx)?) {
                 Some(r) => {
-                    let _entered = r.span.enter();
-                    tracing::info!(
-                        in_flight_requests = self.as_mut().in_flight_requests(),
-                        "ThrottleRequest",
+                    log::trace!(
+                        "ThrottleRequest: inflight {}",
+                        self.as_mut().in_flight_requests(),
                     );
 
                     self.as_mut().start_send(Response {
@@ -187,7 +186,6 @@ mod tests {
         marker::PhantomData,
         time::{Duration, Instant},
     };
-    use tracing::Span;
 
     #[tokio::test]
     async fn throttler_in_flight_requests() {
@@ -201,7 +199,7 @@ mod tests {
             throttler
                 .inner
                 .in_flight_requests
-                .start_request(i, Instant::now() + Duration::from_secs(1), Span::current())
+                .start_request(i, Instant::now() + Duration::from_secs(1))
                 .unwrap();
         }
         assert_eq!(throttler.as_mut().in_flight_requests(), 5);
@@ -320,7 +318,7 @@ mod tests {
         throttler
             .inner
             .in_flight_requests
-            .start_request(0, Instant::now() + Duration::from_secs(1), Span::current())
+            .start_request(0, Instant::now() + Duration::from_secs(1))
             .unwrap();
         throttler
             .as_mut()

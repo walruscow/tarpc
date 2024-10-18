@@ -76,17 +76,6 @@ pub enum SamplingDecision {
     Unsampled,
 }
 
-impl Context {
-    /// Constructs a new context with the trace ID and sampling decision inherited from the parent.
-    pub(crate) fn new_child(&self) -> Self {
-        Self {
-            trace_id: self.trace_id,
-            span_id: SpanId::random(&mut rand::thread_rng()),
-            sampling_decision: self.sampling_decision,
-        }
-    }
-}
-
 impl TraceId {
     /// Returns a random trace ID that can be assumed to be globally unique if `rng` generates
     /// actually-random numbers.
