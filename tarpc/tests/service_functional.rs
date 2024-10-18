@@ -62,8 +62,6 @@ async fn dropped_channel_aborts_in_flight_requests() -> anyhow::Result<()> {
         }
     }
 
-    let _ = tracing_subscriber::fmt::try_init();
-
     let (tx, rx) = channel::unbounded();
 
     // Set up a client that initiates a long-lived request.
@@ -95,8 +93,6 @@ async fn serde_tcp() -> anyhow::Result<()> {
     use tarpc::serde_transport;
     use tokio_serde::formats::Json;
 
-    let _ = tracing_subscriber::fmt::try_init();
-
     let transport = tarpc::serde_transport::tcp::listen("localhost:56789", Json::default).await?;
     let addr = transport.local_addr();
     tokio::spawn(
@@ -127,8 +123,6 @@ async fn serde_uds() -> anyhow::Result<()> {
     use tarpc::serde_transport;
     use tokio_serde::formats::Json;
 
-    let _ = tracing_subscriber::fmt::try_init();
-
     let sock = tarpc::serde_transport::unix::TempPathBuf::with_random("uds");
     let transport = tarpc::serde_transport::unix::listen(&sock, Json::default).await?;
     tokio::spawn(
@@ -156,8 +150,6 @@ async fn serde_uds() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn concurrent() -> anyhow::Result<()> {
-    let _ = tracing_subscriber::fmt::try_init();
-
     let (tx, rx) = channel::unbounded();
     tokio::spawn(
         stream::once(ready(rx))
@@ -182,8 +174,6 @@ async fn concurrent() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn concurrent_join() -> anyhow::Result<()> {
-    let _ = tracing_subscriber::fmt::try_init();
-
     let (tx, rx) = channel::unbounded();
     tokio::spawn(
         stream::once(ready(rx))
@@ -214,8 +204,6 @@ async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
 
 #[tokio::test]
 async fn concurrent_join_all() -> anyhow::Result<()> {
-    let _ = tracing_subscriber::fmt::try_init();
-
     let (tx, rx) = channel::unbounded();
     tokio::spawn(
         BaseChannel::with_defaults(rx)

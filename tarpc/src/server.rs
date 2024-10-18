@@ -360,7 +360,6 @@ where
     /// ```rust
     /// use tarpc::{context, client, server::{self, BaseChannel, Channel, serve}, transport};
     /// use futures::prelude::*;
-    /// use tracing_subscriber::prelude::*;
     ///
     /// # #[cfg(not(feature = "tokio1"))]
     /// # fn main() {}
@@ -1032,8 +1031,6 @@ mod tests {
 
     #[tokio::test]
     async fn serve_before_and_after() -> anyhow::Result<()> {
-        let _ = tracing_subscriber::fmt::try_init();
-
         struct PrintLatency {
             start: Instant,
         }

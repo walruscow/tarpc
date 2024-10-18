@@ -185,8 +185,6 @@ mod tests {
 
     #[tokio::test]
     async fn integration() -> anyhow::Result<()> {
-        let _ = tracing_subscriber::fmt::try_init();
-
         let (client_channel, server_channel) = transport::channel::unbounded();
         tokio::spawn(
             stream::once(future::ready(server_channel))

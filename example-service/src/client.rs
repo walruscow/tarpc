@@ -6,9 +6,8 @@
 
 use clap::Parser;
 use service::WorldClient;
-use std::{net::SocketAddr, time::Duration};
+use std::net::SocketAddr;
 use tarpc::{client, context, tokio_serde::formats::Json};
-use tokio::time::sleep;
 
 #[derive(Parser)]
 struct Flags {
@@ -44,10 +43,5 @@ async fn main() -> anyhow::Result<()> {
         Ok(hello) => log::info!("{hello:?}"),
         Err(e) => log::warn!("{:?}", anyhow::Error::from(e)),
     }
-
-    // Let the background span processor finish.
-    sleep(Duration::from_micros(1)).await;
-    opentelemetry::global::shutdown_tracer_provider();
-
     Ok(())
 }
