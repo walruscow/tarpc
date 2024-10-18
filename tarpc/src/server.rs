@@ -489,13 +489,9 @@ where
                             }
                         }
                     }
-                    ClientMessage::Cancel {
-                        trace_context,
-                        request_id,
-                    } => {
+                    ClientMessage::Cancel { request_id } => {
                         if !self.in_flight_requests_mut().cancel_request(request_id) {
-                            tracing::trace!(
-                                rpc.trace_id = %trace_context.trace_id,
+                            log::trace!(
                                 "Received cancellation, but response handler is already complete.",
                             );
                         }
@@ -960,7 +956,7 @@ mod tests {
         serve, BaseChannel, Channel, Config, Requests, Serve,
     };
     use crate::{
-        context, trace,
+        context,
         transport::channel::{self, UnboundedChannel},
         ClientMessage, Request, Response, ServerError,
     };
@@ -1187,12 +1183,9 @@ mod tests {
             })
             .unwrap();
 
-        tx.send(ClientMessage::Cancel {
-            trace_context: trace::Context::default(),
-            request_id: 0,
-        })
-        .await
-        .unwrap();
+        tx.send(ClientMessage::Cancel { request_id: 0 })
+            .await
+            .unwrap();
 
         assert_matches!(
             channel.as_mut().poll_next(&mut noop_context()),

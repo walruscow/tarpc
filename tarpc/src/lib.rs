@@ -38,14 +38,6 @@
 //!   requests sent by the server that use the request context will propagate the request deadline.
 //!   For example, if a server is handling a request with a 10s deadline, does 2s of work, then
 //!   sends a request to another server, that server will see an 8s deadline.
-//! - Distributed tracing: tarpc is instrumented with
-//!   [tracing](https://github.com/tokio-rs/tracing) primitives extended with
-//!   [OpenTelemetry](https://opentelemetry.io/) traces. Using a compatible tracing subscriber like
-//!   [OTLP](https://github.com/open-telemetry/opentelemetry-rust/tree/main/opentelemetry-otlp),
-//!   each RPC can be traced through the client, server, and other dependencies downstream of the
-//!   server. Even for applications not connected to a distributed tracing collector, the
-//!   instrumentation can also be ingested by regular loggers like
-//!   [env_logger](https://github.com/env-logger-rs/env_logger/).
 //! - Serde serialization: enabling the `serde1` Cargo feature will make service requests and
 //!   responses `Serialize + Deserialize`. It's entirely optional, though: in-memory transports can
 //!   be used, as well, so the price of serialization doesn't have to be paid when it's not needed.
@@ -183,7 +175,7 @@
 //!
 //!     // The client has an RPC method for each RPC defined in the annotated trait. It takes the same
 //!     // args as defined, with the addition of a Context, which is always the first arg. The Context
-//!     // specifies a deadline and trace information which can be helpful in debugging requests.
+//!     // specifies a deadline information which can be helpful in debugging requests.
 //!     let hello = client.hello(context::current(), "Stim".to_string()).await?;
 //!
 //!     println!("{hello}");
@@ -269,10 +261,6 @@ pub enum ClientMessage<T> {
     /// not be canceled, because the framework layer does not
     /// know about them.
     Cancel {
-        /// The trace context associates the message with a specific chain of causally-related actions,
-        /// possibly orchestrated across many distributed systems.
-        #[cfg_attr(feature = "serde1", serde(default))]
-        trace_context: trace::Context,
         /// The ID of the request to cancel.
         request_id: u64,
     },

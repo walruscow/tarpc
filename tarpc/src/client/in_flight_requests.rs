@@ -9,7 +9,6 @@ use std::{
 };
 use tokio::sync::oneshot;
 use tokio_util::time::delay_queue::{self, DelayQueue};
-use tracing::Span;
 
 /// Requests already written to the wire that haven't yet received responses.
 #[derive(Debug)]
@@ -30,7 +29,6 @@ impl<Resp> Default for InFlightRequests<Resp> {
 #[derive(Debug)]
 struct RequestData<Res> {
     ctx: context::Context,
-    span: Span,
     response_completion: oneshot::Sender<Res>,
     /// The key to remove the timer for the request's deadline.
     deadline_key: delay_queue::Key,
@@ -57,7 +55,6 @@ impl<Res> InFlightRequests<Res> {
         &mut self,
         request_id: u64,
         ctx: context::Context,
-        span: Span,
         response_completion: oneshot::Sender<Res>,
     ) -> Result<(), AlreadyExistsError> {
         match self.request_data.entry(request_id) {
@@ -66,7 +63,6 @@ impl<Res> InFlightRequests<Res> {
                 let deadline_key = self.deadlines.insert(request_id, timeout);
                 vacant.insert(RequestData {
                     ctx,
-                    span,
                     response_completion,
                     deadline_key,
                 });
@@ -77,15 +73,15 @@ impl<Res> InFlightRequests<Res> {
     }
 
     /// Removes a request without aborting. Returns true iff the request was found.
-    pub fn complete_request(&mut self, request_id: u64, result: Res) -> Option<Span> {
+    pub fn complete_request(&mut self, request_id: u64, result: Res) -> Option<()> {
         if let Some(request_data) = self.request_data.remove(&request_id) {
             self.request_data.compact(0.1);
             self.deadlines.remove(&request_data.deadline_key);
             let _ = request_data.response_completion.send(result);
-            return Some(request_data.span);
+            return Some(());
         }
 
-        tracing::debug!("No in-flight request found for request_id = {request_id}.");
+        log::debug!("No in-flight request found for request_id = {request_id}.");
 
         // If the response completion was absent, then the request was already canceled.
         None
@@ -96,21 +92,21 @@ impl<Res> InFlightRequests<Res> {
     pub fn complete_all_requests<'a>(
         &'a mut self,
         mut result: impl FnMut() -> Res + 'a,
-    ) -> impl Iterator<Item = Span> + 'a {
+    ) -> impl Iterator<Item = ()> + 'a {
         self.deadlines.clear();
         self.request_data.drain().map(move |(_, request_data)| {
             let _ = request_data.response_completion.send(result());
-            request_data.span
+            ()
         })
     }
 
     /// Cancels a request without completing (typically used when a request handle was dropped
     /// before the request completed).
-    pub fn cancel_request(&mut self, request_id: u64) -> Option<(context::Context, Span)> {
+    pub fn cancel_request(&mut self, request_id: u64) -> Option<context::Context> {
         if let Some(request_data) = self.request_data.remove(&request_id) {
             self.request_data.compact(0.1);
             self.deadlines.remove(&request_data.deadline_key);
-            Some((request_data.ctx, request_data.span))
+            Some(request_data.ctx)
         } else {
             None
         }
@@ -126,8 +122,6 @@ impl<Res> InFlightRequests<Res> {
         self.deadlines.poll_expired(cx).map(|expired| {
             let request_id = expired?.into_inner();
             if let Some(request_data) = self.request_data.remove(&request_id) {
-                let _entered = request_data.span.enter();
-                tracing::error!("DeadlineExceeded");
                 self.request_data.compact(0.1);
                 let _ = request_data.response_completion.send(expired_error());
             }

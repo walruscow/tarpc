@@ -11,9 +11,7 @@ pub mod stub;
 
 use crate::{
     cancellations::{cancellations, CanceledRequests, RequestCancellation},
-    context, trace,
-    util::TimeUntil,
-    ChannelError, ClientMessage, Request, RequestName, Response, ServerError, Transport,
+    context, ChannelError, ClientMessage, Request, RequestName, Response, ServerError, Transport,
 };
 use futures::{prelude::*, ready, stream::Fuse, task::*};
 use in_flight_requests::InFlightRequests;
@@ -27,10 +25,8 @@ use std::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
-    time::SystemTime,
 };
 use tokio::sync::{mpsc, oneshot};
-use tracing::Span;
 
 /// Settings that control the behavior of the client.
 #[derive(Clone, Debug)]
@@ -119,24 +115,7 @@ where
 {
     /// Sends a request to the dispatch task to forward to the server, returning a [`Future`] that
     /// resolves to the response.
-    #[tracing::instrument(
-        name = "RPC",
-        skip(self, ctx, request),
-        fields(
-            rpc.trace_id = tracing::field::Empty,
-            rpc.deadline = %humantime::format_rfc3339(SystemTime::now() + ctx.deadline.time_until()),
-            otel.kind = "client",
-            otel.name = %request.name())
-        )]
-    pub async fn call(&self, mut ctx: context::Context, request: Req) -> Result<Resp, RpcError> {
-        let span = Span::current();
-        ctx.trace_context = trace::Context::try_from(&span).unwrap_or_else(|_| {
-            tracing::trace!(
-                "OpenTelemetry subscriber not installed; making unsampled child context."
-            );
-            ctx.trace_context.new_child()
-        });
-        span.record("rpc.trace_id", tracing::field::display(ctx.trace_id()));
+    pub async fn call(&self, ctx: context::Context, request: Req) -> Result<Resp, RpcError> {
         let (response_completion, mut response) = oneshot::channel();
         let request_id =
             u64::try_from(self.next_request_id.fetch_add(1, Ordering::Relaxed)).unwrap();
@@ -154,7 +133,6 @@ where
         self.to_dispatch
             .send(DispatchRequest {
                 ctx,
-                span,
                 request_id,
                 request,
                 response_completion,
@@ -436,8 +414,6 @@ where
             match ready!(self.pending_requests_mut().poll_recv(cx)) {
                 Some(request) => {
                     if request.response_completion.is_closed() {
-                        let _entered = request.span.enter();
-                        tracing::info!("AbortRequest");
                         continue;
                     }
 
@@ -457,15 +433,14 @@ where
     fn poll_next_cancellation(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<(context::Context, Span, u64), ChannelError<C::Error>>>> {
+    ) -> Poll<Option<Result<(context::Context, u64), ChannelError<C::Error>>>> {
         ready!(self.ensure_writeable(cx)?);
 
         loop {
             match ready!(self.canceled_requests_mut().poll_next_unpin(cx)) {
                 Some(request_id) => {
-                    if let Some((ctx, span)) = self.in_flight_requests().cancel_request(request_id)
-                    {
-                        return Poll::Ready(Some(Ok((ctx, span, request_id))));
+                    if let Some(ctx) = self.in_flight_requests().cancel_request(request_id) {
+                        return Poll::Ready(Some(Ok((ctx, request_id))));
                     }
                 }
                 None => return Poll::Ready(None),
@@ -498,7 +473,6 @@ where
     ) -> Poll<Option<Result<(), ChannelError<C::Error>>>> {
         let DispatchRequest {
             ctx,
-            span,
             request_id,
             request,
             response_completion,
@@ -506,7 +480,6 @@ where
             Some(dispatch_request) => dispatch_request,
             None => return Poll::Ready(None),
         };
-        let _entered = span.enter();
         // poll_next_request only returns Ready if there is room to buffer another request.
         // Therefore, we can call write_request without fear of erroring due to a full
         // buffer.
@@ -519,10 +492,10 @@ where
             },
         });
         self.in_flight_requests()
-            .insert_request(request_id, ctx, span.clone(), response_completion)
+            .insert_request(request_id, ctx, response_completion)
             .expect("Request IDs should be unique");
         match self.start_send(request) {
-            Ok(()) => tracing::info!("SendRequest"),
+            Ok(()) => log::debug!("SendRequest"),
             Err(e) => {
                 self.in_flight_requests()
                     .complete_request(request_id, Err(RpcError::Send(Box::new(e))));
@@ -541,30 +514,25 @@ where
         self: &'a mut Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<(), ChannelError<C::Error>>>> {
-        let (context, span, request_id) = match ready!(self.as_mut().poll_next_cancellation(cx)?) {
+        let (_, request_id) = match ready!(self.as_mut().poll_next_cancellation(cx)?) {
             Some(triple) => triple,
             None => return Poll::Ready(None),
         };
-        let _entered = span.enter();
 
-        let cancel = ClientMessage::Cancel {
-            trace_context: context.trace_context,
-            request_id,
-        };
+        let cancel = ClientMessage::Cancel { request_id };
         self.start_send(cancel)
             .map_err(|e| ChannelError::Write(Arc::new(e)))?;
-        tracing::trace!("CancelRequest");
+        log::trace!("CancelRequest");
         Poll::Ready(Some(Ok(())))
     }
 
     /// Sends a server response to the client task that initiated the associated request.
     fn complete(mut self: Pin<&mut Self>, response: Response<Resp>) -> bool {
-        if let Some(span) = self.in_flight_requests().complete_request(
+        if let Some(_) = self.in_flight_requests().complete_request(
             response.request_id,
             response.message.map_err(RpcError::Server),
         ) {
-            let _entered = span.enter();
-            tracing::trace!("ReceiveResponse");
+            log::trace!("ReceiveResponse");
             return true;
         }
         false
@@ -578,25 +546,22 @@ where
         e: ChannelError<dyn std::error::Error + Send + Sync + 'static>,
     ) -> Poll<()> {
         self.pending_requests_mut().close();
-        for span in self
+        for _ in self
             .in_flight_requests()
             .complete_all_requests(|| Err(RpcError::Channel(e.clone())))
         {
-            let _entered = span.enter();
-            tracing::warn!("RpcError::Channel");
+            log::warn!("RpcError::Channel");
         }
         loop {
             match ready!(self.pending_requests_mut().poll_recv(cx)) {
                 Some(DispatchRequest {
-                    span,
                     response_completion,
                     ..
                 }) => {
-                    let _entered = span.enter();
                     if response_completion.is_closed() {
-                        tracing::trace!("AbortRequest");
+                        log::trace!("AbortRequest");
                     } else {
-                        tracing::warn!("RpcError::Channel");
+                        log::warn!("RpcError::Channel");
                         let _ = response_completion.send(Err(RpcError::Channel(e.clone())));
                     }
                 }
@@ -670,7 +635,6 @@ where
 #[derive(Debug)]
 struct DispatchRequest<Req, Resp> {
     pub ctx: context::Context,
-    pub span: Span,
     pub request_id: u64,
     pub request: Req,
     pub response_completion: oneshot::Sender<Result<Resp, RpcError>>,
@@ -704,7 +668,6 @@ mod tests {
         mpsc::{self},
         oneshot,
     };
-    use tracing::Span;
 
     #[tokio::test]
     async fn response_completes_request_future() {
@@ -714,7 +677,7 @@ mod tests {
 
         dispatch
             .in_flight_requests
-            .insert_request(0, context::current(), Span::current(), tx)
+            .insert_request(0, context::current(), tx)
             .unwrap();
         server_channel
             .send(Response {
@@ -1092,7 +1055,6 @@ mod tests {
                 u64::try_from(channel.next_request_id.fetch_add(1, Ordering::Relaxed)).unwrap();
             let request = DispatchRequest {
                 ctx: context::current(),
-                span: Span::current(),
                 request_id,
                 request: request.to_string(),
                 response_completion,
@@ -1117,7 +1079,6 @@ mod tests {
             u64::try_from(channel.next_request_id.fetch_add(1, Ordering::Relaxed)).unwrap();
         let request = DispatchRequest {
             ctx: context::current(),
-            span: Span::current(),
             request_id,
             request: request.to_string(),
             response_completion,
