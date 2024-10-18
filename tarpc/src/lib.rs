@@ -204,8 +204,6 @@ pub use {tokio_serde, tokio_util};
 #[cfg_attr(docsrs, doc(cfg(feature = "serde-transport")))]
 pub mod serde_transport;
 
-pub mod trace;
-
 #[cfg(feature = "serde1")]
 pub use tarpc_plugins::derive_serde;
 
