@@ -352,14 +352,14 @@ fn collect_cfg_attrs(rpcs: &[RpcMethod]) -> Vec<Vec<&Attribute>> {
         .map(|rpc| {
             rpc.attrs
                 .iter()
-                .filter(|att| {
-                    att.style == AttrStyle::Outer
-                        && match &att.meta {
-                            syn::Meta::List(syn::MetaList { path, .. }) => {
-                                path.get_ident() == Some(&Ident::new("cfg", rpc.ident.span()))
-                            }
-                            _ => false,
+                .filter(|att| match att.style {
+                    AttrStyle::Outer => match &att.meta {
+                        syn::Meta::List(syn::MetaList { path, .. }) => {
+                            path.get_ident() == Some(&Ident::new("cfg", rpc.ident.span()))
                         }
+                        _ => false,
+                    },
+                    _ => false,
                 })
                 .collect::<Vec<_>>()
         })

@@ -145,7 +145,7 @@ pub trait RequestHook: Serve {
     ///         _: &mut context::Context,
     ///         _: &mut Result<Resp, ServerError>,
     ///     ) {
-    ///         tracing::info!("Elapsed: {:?}", self.0.elapsed());
+    ///         log::info!("Elapsed: {:?}", self.0.elapsed());
     ///     }
     /// }
     ///
