@@ -553,7 +553,7 @@ where
         };
         self.start_send(cancel)
             .map_err(|e| ChannelError::Write(Arc::new(e)))?;
-        tracing::info!("CancelRequest");
+        tracing::trace!("CancelRequest");
         Poll::Ready(Some(Ok(())))
     }
 
@@ -564,7 +564,7 @@ where
             response.message.map_err(RpcError::Server),
         ) {
             let _entered = span.enter();
-            tracing::info!("ReceiveResponse");
+            tracing::trace!("ReceiveResponse");
             return true;
         }
         false
@@ -594,7 +594,7 @@ where
                 }) => {
                     let _entered = span.enter();
                     if response_completion.is_closed() {
-                        tracing::info!("AbortRequest");
+                        tracing::trace!("AbortRequest");
                     } else {
                         tracing::warn!("RpcError::Channel");
                         let _ = response_completion.send(Err(RpcError::Channel(e.clone())));
@@ -612,15 +612,15 @@ where
         loop {
             match (self.as_mut().pump_read(cx)?, self.as_mut().pump_write(cx)?) {
                 (Poll::Ready(None), _) => {
-                    tracing::info!("Shutdown: read half closed, so shutting down.");
+                    tracing::trace!("Shutdown: read half closed, so shutting down.");
                     return Poll::Ready(Ok(()));
                 }
                 (read, Poll::Ready(None)) => {
                     if self.in_flight_requests.is_empty() {
-                        tracing::info!("Shutdown: write half closed, and no requests in flight.");
+                        tracing::trace!("Shutdown: write half closed, and no requests in flight.");
                         return Poll::Ready(Ok(()));
                     }
-                    tracing::info!(
+                    tracing::trace!(
                         "Shutdown: write half closed, and {} requests in flight.",
                         self.in_flight_requests().len()
                     );
